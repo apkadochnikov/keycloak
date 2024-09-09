@@ -1,0 +1,78 @@
+name: keycloak-app
+services:
+  web:
+    image: nginx:1.27.1-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - frontend-net
+    volumes:
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+      - type: bind
+        source: ${SSL_CERTIFICATE_KEY}
+        target: /var/ssl_certificate.key
+        read_only: true
+      - type: bind
+        source: ${SSL_CERTIFICATE}
+        target: /var/ssl_certificate.crt
+        read_only: true
+
+    depends_on:
+      - keycloak
+    restart: always
+
+  postgres:
+    image: postgres:16.2
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - backend-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+      start_interval: 1s
+    restart: always
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0.4
+    command: start --proxy-headers xforwarded --hostname-strict false --http-enabled true
+    environment:
+      KC_HOSTNAME: ${KC_HOSTNAME}
+      KC_HOSTNAME_PORT: 8080
+      KC_HOSTNAME_STRICT_BACKCHANNEL: false
+      KC_HTTP_ENABLED: true
+      KC_HOSTNAME_STRICT_HTTPS: false
+      KC_HEALTH_ENABLED: true
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres/${POSTGRES_DB}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+    networks:
+      - frontend-net
+      - backend-net
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  frontend-net:
+  backend-net:
